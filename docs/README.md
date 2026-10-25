@@ -1,127 +1,152 @@
-# Paxinos 图谱自动测量工具
+<h1 align="center">Paxinos Atlas Automatic Measurement Tool</h1>
 
-从《Paxinos and Franklin's The Mouse Brain in Stereotaxic Coordinates（第五版）》示意图 PDF
-中自动读取某个核团的立体定位坐标（以 bregma 为原点），并输出毫米网格标注图与 json。
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white" alt="python">
+  <img src="https://img.shields.io/badge/segmentation-OpenCV-5C3EE8?logo=opencv&logoColor=white" alt="OpenCV">
+  <img src="https://img.shields.io/badge/output-PNG%20%7C%20JSON-brightgreen" alt="output">
+</p>
 
-## 1. 坐标体系
+<p align="center">
+  <b>English</b> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.fr.md">Français</a>
+</p>
 
-图谱前言（第 xi 页）定义了页面四周标尺的含义：
+Reads the stereotaxic coordinates of a nucleus (origin at bregma) directly from the schematic PDF of *Paxinos and Franklin's The Mouse Brain in Stereotaxic Coordinates (5th edition)*, and writes an annotated millimetre-grid image and a JSON file.
 
-| 位置 | 含义 | 正方向 |
-| --- | --- | --- |
-| 左缘黑字 0–5 | 距内耳线（interaural line）水平面的背腹距离 | 向上（背侧）为正 |
-| 右缘红字 1–6 | 距 bregma–lambda 颅顶平面的背腹距离 | 向下（腹侧）为正 |
-| 上、下缘数字 | 距中线的距离（ML，mediolateral） | 中线为 0 |
-| 左下角大字 | 距内耳线垂直平面的前后距离（Interaural） | |
-| 右上角红字 | 距 bregma 垂直平面的前后距离（Bregma） | 前方为正 |
+---
 
-最小刻度 0.25 mm，每个 1 mm 印一个数字。注射坐标通常写成
-`x(ML) = ±… mm，y(AP) = bregma 值，z(DV) = 距 bregma–lambda 平面的深度`。
+## Coordinate system
 
-## 2. 原理
+The atlas preface (page xi) defines the rulers printed along the four page margins:
 
-### 2.1 页面标定（atlas_core.calibrate）
+| Position                | Meaning                                                       | Positive direction  |
+| ----------------------- | ------------------------------------------------------------- | ------------------- |
+| Black numbers 0–5, left | Dorsoventral distance from the horizontal interaural plane     | Up (dorsal)         |
+| Red numbers 1–6, right  | Dorsoventral distance from the bregma–lambda skull-top plane   | Down (ventral)      |
+| Numbers, top and bottom | Distance from the midline (ML, mediolateral)                   | Midline = 0         |
+| Large number, bottom-left | Anteroposterior distance from the vertical interaural plane (Interaural) |           |
+| Red number, top-right   | Anteroposterior distance from the vertical bregma plane (Bregma) | Anterior          |
 
-示意图 PDF 是矢量文件，文字有文本层、线条有路径层，因此可以精确反解出
-「PDF 点」与「图谱毫米」之间的线性关系：
+The finest tick is 0.25 mm and every 1 mm carries a number. Injection coordinates are usually written as `x(ML) = ±… mm, y(AP) = bregma value, z(DV) = depth from the bregma–lambda plane`.
 
-1. 用 `get_text('dict')` 取出全部文字片段及其边框与字号，按位置挑出三组标尺数字
-   （上缘、左缘、右缘），数字值就是毫米值。
-2. 对每组数字做最小二乘拟合 `坐标 = 零点 + 每毫米点数 × 毫米值`。三条标尺斜率
-   的中位数作为比例尺（本图谱约 69.08 pt/mm）。
-3. 用 `get_drawings()` 取出四条页边上的短刻度线，推断最小刻度是 0.25 mm，
-   得到刻度栅格。
-4. 数字边框的中心与刻度线之间有约 1 pt 的系统偏差（字体度量造成），且文字笔画
-   可能被误判成刻度。因此栅格相位按两步确定：先用严格容差（0.35 pt）筛掉笔画
-   这类假刻度，再在候选相位中取「数字中心到最近栅格点平均距离」最小的那个。
-5. 零点 = 数字拟合截距吸附到该栅格上最近的点。
+---
 
-标定完成后即得三个零点（中线 `X0`、bregma 零点 `YR0`、内耳零点 `YB0`）与比例尺 `MM`。
+## How it works
 
-### 2.2 轮廓极值（atlas_core.outline_extremes）
+### Page calibration (atlas_core.calibrate)
 
-把页面渲染成位图，按切片轮廓线的颜色（深蓝 RGB≈(16,103,153)，由矢量描边颜色
-自动识别）筛选像素，统计最高点与最低点，换算成两套 DV 坐标，用于回答
-「脑顶在哪里」「0 为什么不在脑底」这类问题，也用于计算从脑表面起算的进针深度。
+The schematic PDF is a vector file: text has a text layer and lines have a path layer, so the linear relation between PDF points and atlas millimetres can be recovered exactly:
 
-### 2.3 核团区域分割（atlas_nucleus.measure）
+1. `get_text('dict')` returns every text span with its bounding box and font size; three groups of ruler numbers (top edge, left edge, right edge) are picked by position. The number values are the millimetre values.
+2. Each group is fitted by least squares as `coordinate = zero + points per mm × mm value`. The median of the three slopes is used as the scale (about 69.08 pt/mm for this atlas).
+3. `get_drawings()` collects the short tick marks on the four page margins, from which the finest tick is inferred to be 0.25 mm and the tick grid is obtained.
+4. The centres of the number boxes sit about 1 pt away from the tick marks because of font metrics, and glyph strokes can be mistaken for ticks. The grid phase is therefore fixed in two steps: a strict tolerance (0.35 pt) first removes false ticks such as strokes, then among the candidate phases the one minimizing the mean distance from number centres to the nearest grid point is chosen.
+5. Zero = the fitted intercept snapped to the nearest point of that grid.
 
-1. **定位标签**：在文本层中查找与缩写完全相同的片段（排除页面底部字号更小的
-   缩略语表），得到标签中心，按中线分成左右两处。
-2. **取窗口渲染**：以标签为中心、半径 `--window`（默认 0.8 mm）取矩形区域，
-   按 `--dpi`（默认 900）渲染成位图。
-3. **构造屏障**：核团内部是白色，边界是实线或虚线。把非白色像素视为屏障；
-   虚线有缺口（本图谱为 1.44 pt），用形态学膨胀把缺口封住，膨胀半径按
-   `虚线间隙 / 2 + 4` 像素计算，保证 2K 大于缺口宽度。
-4. **连通域标记**：对剩余空白做连通域分析（`connectedComponentsWithStats`），
-   按面积筛选（`--min-area` 至 `--max-area`），得到候选区域。
-5. **选中目标**：取标签附近（半径 0.2 mm）出现过、且质心离标签最近的候选区域。
-   这一步利用「图谱标签画在对应核团内部或紧邻处」这一约定，实现自动定位。
-   若标签附近没有尺寸合适的区域，则退回「质心最近」并给出警告。
-6. **换算输出**：区域外接矩形与质心由像素坐标换算成 mm，得到
-   `ML 范围 / DV 范围 / 面积 / 质心`，并组合出以 bregma 为原点的坐标
-   `x(ML)、y(AP)、z(DV)`；同时给出该 ML 处脑表面高度，得到自脑表面起算的深度。
+Calibration yields three zero points (midline `X0`, bregma zero `YR0`, interaural zero `YB0`) and the scale `MM`.
 
-## 3. 用法
+### Outline extremes (atlas_core.outline_extremes)
+
+The page is rendered to a bitmap and pixels matching the colour of the section outline (dark blue, RGB≈(16,103,153), detected automatically from the vector stroke colour) are selected. The highest and lowest points are measured and converted into both DV coordinates. This answers questions such as where the top of the brain lies and why 0 is not at the bottom of the brain, and it also gives the injection depth measured from the brain surface.
+
+### Nucleus region segmentation (atlas_nucleus.measure)
+
+1. **Locate the label**: search the text layer for the span identical to the abbreviation (excluding the smaller abbreviation list at the bottom of the page), take its centre, and split it into a left and a right instance across the midline.
+2. **Render a window**: take a rectangle centred on the label with radius `--window` (default 0.8 mm) and render it at `--dpi` (default 900).
+3. **Build barriers**: the interior of the nucleus is white and its boundary is a solid or dashed line. Non-white pixels are treated as barriers. Dashed lines have gaps (1.44 pt in this atlas), which are closed by morphological dilation with a radius of `gap / 2 + 4` pixels, so that 2K exceeds the gap width.
+4. **Connected components**: label the remaining white space with `connectedComponentsWithStats` and filter by area (`--min-area` to `--max-area`) to obtain candidates.
+5. **Select the target**: take the candidate that occurs near the label (within 0.2 mm) and whose centroid is closest to the label. This exploits the convention that atlas labels are printed inside or immediately next to the nucleus. If no suitably sized region is found near the label, the code falls back to "closest centroid" and prints a warning.
+6. **Convert and output**: convert the bounding rectangle and centroid from pixels to millimetres to obtain `ML range / DV range / area / centroid`, and combine them into bregma-centred coordinates `x(ML), y(AP), z(DV)`. The brain-surface height at that ML is reported as well, which gives the depth from the brain surface.
+
+---
+
+## Usage
 
 ```bash
-python paxinos_auto.py calibrate --page 43                    # 只做标定，打印零点与残差
-python paxinos_auto.py outline   --page 43                    # 打印轮廓极值
-python paxinos_auto.py nucleus   --page 43 --abbr AD          # 测量核团并保存标注图与 json
-python paxinos_auto.py all       --page 43 --abbr AD --list   # 标定 + 轮廓 + 核团，并列出候选区域
+python paxinos_auto.py calibrate --page 43                    # calibration only: zero points and residuals
+python paxinos_auto.py outline   --page 43                    # outline extremes
+python paxinos_auto.py nucleus   --page 43 --abbr AD          # measure the nucleus, save image and JSON
+python paxinos_auto.py all       --page 43 --abbr AD --list   # calibration + outline + nucleus, list candidates
 ```
 
-可选参数：
+Optional arguments:
 
-| 参数 | 说明 |
-| --- | --- |
-| `--pdf` | 图谱 PDF 路径，默认使用上一级的 `Paxinos脑图谱/Paxinos脑图谱(第五版)-示意图.pdf` |
-| `--page` | PDF 页码（从 1 开始），即图中的 Figure 号加 6 |
-| `--abbr` | 核团缩写，与页面标签完全一致，如 `AD`、`MD`、`AVDM` |
-| `--dpi` | 分割用的渲染分辨率，默认 900；区域很小时可提高到 1200 |
-| `--window` | 标签周围窗口半径（mm），默认 0.8 |
-| `--min-area/--max-area` | 候选区域面积范围（mm²），默认 0.01 至 1.5 |
-| `--out` | 输出目录，默认本目录下 `output/` |
-| `--list` | 打印窗口内全部候选区域，便于人工核对 |
-| `--no-save` | 只打印结果，不写文件 |
+| Argument                | Description                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `--pdf`                 | Atlas PDF path; defaults to `Paxinos脑图谱/Paxinos脑图谱(第五版)-示意图.pdf` one level above |
+| `--page`                | PDF page number (1-based), i.e. the figure number plus 6                                     |
+| `--abbr`                | Nucleus abbreviation, exactly as printed on the page, e.g. `AD`, `MD`, `AVDM`                |
+| `--dpi`                 | Render resolution for segmentation, default 900; raise to 1200 for very small regions        |
+| `--window`              | Window radius around the label (mm), default 0.8                                             |
+| `--min-area/--max-area` | Candidate area range (mm²), default 0.01 to 1.5                                              |
+| `--out`                 | Output directory, default `output/` in this directory                                        |
+| `--list`                | Print all candidates in the window for manual checking                                       |
+| `--no-save`             | Print results only, write no files                                                           |
 
-输出目录内会生成：
+The output directory contains:
 
-- `nucleus_<缩写>_p<页码>_<左/右>.png`：目标区域着色图，叠加 0.5 mm 网格与外接框
-- `measure_<缩写>_p<页码>.json`：标定参数、两侧区域范围、质心、注射坐标、候选列表
+- `nucleus_<abbr>_p<page>_<left/right>.png`: the target region coloured, with a 0.5 mm grid and the bounding box overlaid
+- `measure_<abbr>_p<page>.json`: calibration parameters, ranges on both sides, centroids, injection coordinates, candidate list
 
-## 4. 精度与限制
+---
 
-- 标定残差通常小于 1 pt（约 0.015 mm），配合刻度吸附后零点不确定度约 ±0.02 mm。
-  与人工在图上读数的差异在同一量级。
-- 只适用于示意图版 PDF（矢量线条）。染色图版是照片位图，边界无法按颜色与
-  连通域分割。
-- 前提是核团在图上是封闭区域；若某条边界未画出或缺口过大，区域会与邻居连通，
-  表现为面积异常偏大，此时用 `--list` 查看候选并调整 `--min-area/--max-area`，
-  或改用量取相邻区域后人工修正。
-- 标签画在核团外部（带引线）的核团，需要人工把窗口中心改到核团处，或先用
-  `--list` 定位正确区域。
-- 面积与质心是「绘图边界」的量，不是组织学边界；作图与统计时以范围与质心为准。
+## Accuracy and limitations
 
-## 5. 文件说明
+- Calibration residuals are usually below 1 pt (about 0.015 mm); after grid snapping the zero-point uncertainty is about ±0.02 mm, the same order as the difference from manual reading on the figure.
+- Only the schematic PDF is supported (vector lines). The stained plates are photographic bitmaps whose boundaries cannot be segmented by colour and connected components.
+- The nucleus must be a closed region in the drawing. If a boundary is not drawn or the gap is too large, the region merges with a neighbour and its area becomes abnormally large. In that case use `--list` to inspect the candidates and adjust `--min-area/--max-area`, or measure the adjacent region and correct manually.
+- For nuclei whose labels are drawn outside the nucleus with a leader line, the window centre has to be moved to the nucleus by hand, or the correct region located with `--list`.
+- Area and centroid describe the drawn boundary, not the histological boundary. Use ranges and centroids for plotting and statistics.
 
-| 文件 | 作用 |
-| --- | --- |
-| `atlas_core.py` | 文本/矢量提取、页面标定、轮廓极值、区域渲染 |
-| `atlas_nucleus.py` | 核团连通域分割、区域选择、坐标换算、标注图输出 |
-| `paxinos_auto.py` | 命令行入口（calibrate / outline / nucleus / all） |
-| `requirements.txt` | 依赖清单：pymupdf、numpy、opencv-python、pillow |
+---
 
-## 6. 复现验证（第 43 页 / Figure 37 / Bregma -0.71 mm）
+## Files
 
+| File               | Purpose                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `atlas_core.py`    | Text/vector extraction, page calibration, outline extremes, region rendering |
+| `atlas_nucleus.py` | Nucleus connected-component segmentation, region selection, coordinate conversion, annotated image |
+| `paxinos_auto.py`  | Command-line entry point (calibrate / outline / nucleus / all)       |
+| `requirements.txt` | Dependencies: pymupdf, numpy, opencv-python, pillow                  |
+
+---
+
+## Reproduction check (page 43 / Figure 37 / Bregma -0.71 mm)
+
+```text
+calibration: X0=391.54 pt  YR0=21.10 pt  YB0=421.68 pt  MM=69.08 pt/mm
+outline:     highest point DV_bregma 0.26 / interaural +5.54; at midline 0.42; lowest point DV_bregma 6.01 / interaural -0.21
+AD   left:   ML -0.94 .. -0.49  DV 2.61 .. 3.15  area 0.081 mm²  centroid (-0.70, 2.84)
+AD   right:  ML +0.52 .. +0.94  DV 2.64 .. 3.16  area 0.078 mm²  centroid (+0.70, 2.86)
+     injection: x(ML)=±0.70  y(AP)=-0.71  z(DV)=2.85 mm
+     brain surface at this ML: DV_bregma≈0.3, depth from surface≈2.55 mm
 ```
-标定: X0=391.54 pt  YR0=21.10 pt  YB0=421.68 pt  MM=69.08 pt/mm
-轮廓: 最高点 DV_bregma 0.26 / 内耳 +5.54；中线处 0.42；最低点 DV_bregma 6.01 / 内耳 -0.21
-AD   左: ML -0.94 .. -0.49  DV 2.61 .. 3.15  area 0.081 mm²  质心 (-0.70, 2.84)
-AD   右: ML +0.52 .. +0.94  DV 2.64 .. 3.16  area 0.078 mm²  质心 (+0.70, 2.86)
-     注射坐标: x(ML)=±0.70  y(AP)=-0.71  z(DV)=2.85 mm
-     该处脑表面 DV_bregma≈0.3，自脑表面起算深度≈2.55 mm
+
+The values agree with the original manual procedure to within 0.02 mm; the difference comes from where the calibration zero lands on the tick grid (systematic offset between the centres of the ruler numbers and the tick marks).
+
+---
+
+## Project structure
+
+```text
+Paxinos_auto/
+├── atlas_core.py
+├── atlas_nucleus.py
+├── paxinos_auto.py
+├── paxinos_gui.py
+├── requirements.txt
+├── PaxinosMeasure.spec
+├── .gitignore
+├── docs/
+│   ├── README.md
+│   ├── README.zh-CN.md
+│   ├── README.fr.md
+│   ├── 使用说明.md
+│   └── 使用说明.pdf
+├── resources/
+│   └── Paxinos脑图谱(第五版)-示意图.pdf    # to be provided separately, not tracked
+└── output/                                 # generated at runtime
 ```
 
-与最初人工流程得到的数值相差不超过 0.02 mm，差异来自标定零点在刻度栅格上的
-落点（标尺数字中心与刻度线之间有系统偏差）。
+`build_env/`, `dist/` and `local/` are the local packaging environment and release copy, excluded by `.gitignore`.
