@@ -1,0 +1,39 @@
+# Python 字节码与缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 虚拟环境
+build_env/
+.venv/
+venv/
+env/
+
+# PyInstaller 打包产物（PaxinosMeasure.spec 作为构建配置保留在仓库中）
+build/
+dist/
+*.manifest
+
+# 程序运行输出（标注图与结果 json）
+output/
+
+# 本地发布副本与压缩包
+local/
+
+# 图谱 PDF：受版权保护且体积大，使用者需自备
+resources/Paxinos脑图谱(第五版)-示意图.pdf
+Paxinos脑图谱/
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# 日志
+*.log
